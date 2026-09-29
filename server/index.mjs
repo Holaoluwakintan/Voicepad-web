@@ -103,6 +103,38 @@ const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_MINUTE ?? 10);
 const maxRequestsPerUserPerWindow = Number(process.env.MAX_REQUESTS_PER_USER_PER_MINUTE ?? 20);
 const idempotencyTtlMs = 10 * 60_000;
 
+// Free trial quota tracking (transcriptions per user / per IP)
+const freeUsageCountByUser = new Map();
+const freeUsageCountByIp = new Map();
+const freeLimit = Number(process.env.FREE_TRANSCRIPTIONS_LIMIT ?? 5);
+
+function isUserSubscribed(user) {
+  if (!user) return false;
+  return Boolean(
+    user.user_metadata?.subscription === 'pro' ||
+    user.user_metadata?.is_subscribed === true ||
+    user.app_metadata?.subscription === 'pro'
+  );
+}
+
+function getUsageCount(req) {
+  const userId = req.user?.id;
+  if (userId) return freeUsageCountByUser.get(userId) || 0;
+  return freeUsageCountByIp.get(req.ip) || 0;
+}
+
+function incrementUsageCount(req) {
+  const userId = req.user?.id;
+  if (userId) {
+    const current = freeUsageCountByUser.get(userId) || 0;
+    freeUsageCountByUser.set(userId, current + 1);
+    return current + 1;
+  }
+  const current = freeUsageCountByIp.get(req.ip) || 0;
+  freeUsageCountByIp.set(req.ip, current + 1);
+  return current + 1;
+}
+
 // Periodically clean up stale IPs to avoid unbounded memory growth
 setInterval(() => {
   const now = Date.now();
@@ -135,6 +167,17 @@ app.use(cors({
 }));
 
 app.all(['/health', '/ping'], (_req, res) => res.json({ ok: true, service: 'voicepad-transcription', timestamp: Date.now() }));
+
+app.get('/usage', authMiddleware, (req, res) => {
+  const isSubscribed = isUserSubscribed(req.user);
+  const used = getUsageCount(req);
+  return res.json({
+    isSubscribed,
+    limit: freeLimit,
+    used,
+    remaining: isSubscribed ? Infinity : Math.max(0, freeLimit - used),
+  });
+});
 
 app.get('/metrics', async (req, res) => {
   const token = process.env.METRICS_TOKEN;
@@ -536,6 +579,18 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     return res.status(400).json({ error: 'Audio file or base64 data is required.' });
   }
 
+  // Free trial quota enforcement: non-subscribers are capped at freeLimit
+  const isSubscribed = isUserSubscribed(req.user);
+  const currentUsage = getUsageCount(req);
+  if (!isSubscribed && currentUsage >= freeLimit) {
+    return res.status(402).json({
+      error: 'You have used all your free transcriptions. Please upgrade to a VoicePad subscription to continue.',
+      upgradeRequired: true,
+      limit: freeLimit,
+      used: currentUsage,
+    });
+  }
+
   // 1. Primary: Groq Whisper models across all configured Groq keys
   const models = [
     process.env.GROQ_TRANSCRIPTION_MODEL,
@@ -543,7 +598,7 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
     'whisper-large-v3',
   ].filter(Boolean);
 
-  logger.info({ file: originalFilename, bytes: audioBuffer.length, groqKeys: groqKeys.length, deepgramKeys: deepgramKeys.length }, 'transcription_request');
+  logger.info({ file: originalFilename, bytes: audioBuffer.length, groqKeys: groqKeys.length, deepgramKeys: deepgramKeys.length, currentUsage, freeLimit }, 'transcription_request');
 
   for (const apiKey of groqKeys) {
     for (const model of models) {
@@ -574,8 +629,18 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
           continue; // Try next model candidate
         }
         if (payload?.text && typeof payload.text === 'string') {
-          logger.info({ model }, 'groq_transcription_succeeded');
-          return res.json({ text: payload.text.trim(), model });
+          const used = incrementUsageCount(req);
+          logger.info({ model, used, freeLimit }, 'groq_transcription_succeeded');
+          return res.json({
+            text: payload.text.trim(),
+            model,
+            usage: {
+              used,
+              limit: freeLimit,
+              isSubscribed,
+              remaining: isSubscribed ? Infinity : Math.max(0, freeLimit - used),
+            },
+          });
         }
       } catch (err) {
         logger.warn({ model, err: err instanceof Error ? err.message : err }, 'transcription_attempt_failed');
@@ -587,7 +652,17 @@ app.post('/transcribe', authMiddleware, rateLimitMiddleware, idempotencyMiddlewa
   logger.info('transcribe: Groq keys exhausted or failed, attempting Deepgram fallback');
   const deepgramResult = await callDeepgramTranscription(audioBuffer, audioMimeType);
   if (deepgramResult) {
-    return res.json(deepgramResult);
+    const used = incrementUsageCount(req);
+    logger.info({ model: deepgramResult.model, used, freeLimit }, 'deepgram_transcription_succeeded');
+    return res.json({
+      ...deepgramResult,
+      usage: {
+        used,
+        limit: freeLimit,
+        isSubscribed,
+        remaining: isSubscribed ? Infinity : Math.max(0, freeLimit - used),
+      },
+    });
   }
 
   return res.status(502).json({ error: 'Transcription provider could not process the audio. All providers exhausted. Please retry.' });

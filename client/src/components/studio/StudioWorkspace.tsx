@@ -10,6 +10,7 @@ import RecordCard from './RecordCard';
 import TranscriptResult from './TranscriptResult';
 import AISummary from './AISummary';
 import NoteHistory from './NoteHistory';
+import SubscriptionDialog from '../SubscriptionDialog';
 
 const API_URL = (import.meta.env.VITE_TRANSCRIPTION_API_URL?.trim() || "https://voicepad-transcription.onrender.com").replace(/\/$/, "");
 
@@ -43,6 +44,22 @@ export default function StudioWorkspace({ user, savedNotes, setSavedNotes, refre
   const [category, setCategory] = useState<Category>("Personal");
   const [summary, setSummary] = useState("");
   const [summaryBusy, setSummaryBusy] = useState(false);
+  const [subOpen, setSubOpen] = useState(false);
+  const [usage, setUsage] = useState<{ used: number; limit: number; isSubscribed: boolean } | null>(null);
+
+  const fetchUsage = async () => {
+    try {
+      const res = await fetch(`${API_URL}/usage`, { headers: await getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setUsage(data);
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    void fetchUsage();
+  }, [user]);
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -126,10 +143,22 @@ export default function StudioWorkspace({ user, savedNotes, setSavedNotes, refre
     try {
       const response = await fetch(`${API_URL}/transcribe`, { method: "POST", headers: await getAuthHeaders(), body: form });
       const payload = await response.json().catch(() => null);
+      if (response.status === 402 || payload?.upgradeRequired) {
+        setStatus("idle");
+        if (payload?.used !== undefined && payload?.limit !== undefined) {
+          setUsage({ used: payload.used, limit: payload.limit, isSubscribed: false });
+        }
+        setSubOpen(true);
+        setError("You have reached your free trial limit. Upgrade to VoicePad Focus for unlimited transcription.");
+        return;
+      }
       if (!response.ok) throw new Error(payload?.error || `Transcription failed (${response.status})`);
       if (!payload?.text) throw new Error("The service returned an empty transcript.");
       const cleanText = payload.text.trim();
       setTranscript(cleanText); setStatus("ready"); notify("Transcript ready — your words are now searchable.");
+      if (payload?.usage) {
+        setUsage(payload.usage);
+      }
       if (user) await saveTranscript(cleanText);
     } catch (requestError) { setStatus("error"); setError(friendlyError(requestError)); }
   };
@@ -261,14 +290,45 @@ export default function StudioWorkspace({ user, savedNotes, setSavedNotes, refre
             {user && (
               <NoteHistory notes={filteredNotes} selectedNoteId={selectedNote?.id || null} onSelectNote={chooseNote} />
             )}
-            <div className="studio-hint">
-              <span><Zap size={13} /></span>
-              <p><strong>{user ? `Signed in as ${displayName(user)}` : "Free during beta"}</strong> · {user ? "Your transcripts are saved to your private history." : "Sign in to keep your transcripts."}</p>
+            <div className="studio-hint" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span><Zap size={13} /></span>
+                <p>
+                  <strong>{user ? `Signed in as ${displayName(user)}` : "Free trial"}</strong> · {usage?.isSubscribed ? "Focus Plan (Unlimited)" : `Trial: ${usage ? `${usage.used}/${usage.limit}` : "5"} notes used`}
+                </p>
+              </div>
+              {!usage?.isSubscribed && (
+                <button
+                  type="button"
+                  onClick={() => setSubOpen(true)}
+                  style={{
+                    color: 'var(--coral)',
+                    fontFamily: 'var(--mono)',
+                    fontSize: 8,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    border: '1px solid rgba(227,108,88,0.3)',
+                    background: 'rgba(227,108,88,0.06)'
+                  }}
+                >
+                  Upgrade
+                </button>
+              )}
             </div>
             <audio ref={audioPlayer} onEnded={() => setIsPlaying(false)} hidden />
           </main>
         </div>
       </div>
+      {subOpen && (
+        <SubscriptionDialog
+          onClose={() => setSubOpen(false)}
+          used={usage?.used ?? 5}
+          limit={usage?.limit ?? 5}
+        />
+      )}
       <div className="floating-insight">
         <span className="insight-spark"><Sparkles size={15} /></span>
         <div>
