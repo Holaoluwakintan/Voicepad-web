@@ -28,8 +28,8 @@ export default function Pricing({ scrollTo, notify }: { scrollTo: (id: string) =
           <span className="price-label">FOCUS</span>
           <h3>For your best work.</h3>
           <p>Higher limits, AI summaries, and a searchable home for everything you’ve said.</p>
-          <div className="price"><strong>Coming soon</strong></div>
-          <button className="button button-dark" onClick={() => notify("Focus plan waitlist is coming soon.")}>Join the waitlist <ArrowRight size={15} /></button>
+          <div className="price"><strong>$5</strong><span>/month</span></div>
+          <button className="button button-dark" onClick={() => scrollTo("demo")}>Get Focus Plan <ArrowRight size={15} /></button>
           <ul>
             <li><Check size={14} /> Unlimited voice notes</li>
             <li><Check size={14} /> AI summaries & action items</li>

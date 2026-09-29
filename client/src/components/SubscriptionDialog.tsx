@@ -37,7 +37,7 @@ export default function SubscriptionDialog({ onClose, used, limit }: Props) {
               <div style={{ fontSize: 11, color: '#887d74', fontFamily: 'var(--mono)' }}>FOR EVERYDAY POWER USERS</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <strong style={{ fontSize: 24, letterSpacing: '-0.05em' }}>$9</strong>
+              <strong style={{ fontSize: 24, letterSpacing: '-0.05em' }}>$5</strong>
               <span style={{ fontSize: 11, color: '#887d74' }}>/month</span>
             </div>
           </div>
@@ -65,7 +65,7 @@ export default function SubscriptionDialog({ onClose, used, limit }: Props) {
             onClose();
           }}
         >
-          <Zap size={16} /> Upgrade to VoicePad Focus ($9/mo)
+          <Zap size={16} /> Upgrade to VoicePad Focus ($5/mo)
         </button>
 
         <p style={{ textAlign: 'center', fontSize: 10, color: '#9d948c', marginTop: 12, marginBottom: 0 }}>
