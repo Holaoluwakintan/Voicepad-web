@@ -53,7 +53,7 @@ drop policy if exists "VoicePad users can delete their own notes" on public.voic
 create policy "VoicePad users can delete their own notes" on public.voicepad_notes
   for delete using (auth.uid() = user_id);
 
--- Automatic updated_at trigger
+-- Automatic updated_at trigger function
 create or replace function public.set_updated_at()
 returns trigger as $$
 begin
@@ -62,17 +62,15 @@ begin
 end;
 $$ language plpgsql;
 
+-- Trigger definition
 drop trigger if exists set_voicepad_notes_updated_at on public.voicepad_notes;
-create trigger set_voicepad_notes_updated_at
-before update on public.voicepad_notes
-for each row execute function public.set_updated_at();
+create trigger set_voicepad_notes_updated_at before update on public.voicepad_notes for each row execute function public.set_updated_at();
 
 -- ==============================================================================
 -- 2. Supabase Storage: 'voicepad-audio' Bucket
--- Execute the following in your Supabase SQL Editor to enable audio file uploads:
 -- ==============================================================================
 
--- Create private bucket for voice recordings (if not already created in dashboard)
+-- Create private bucket for voice recordings
 insert into storage.buckets (id, name, public)
 values ('voicepad-audio', 'voicepad-audio', false)
 on conflict (id) do nothing;
