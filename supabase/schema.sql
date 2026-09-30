@@ -1,8 +1,8 @@
 -- ==============================================================================
--- VoicePad: PostgreSQL Database Schema & Cloud Storage Setup
+-- VoicePad: PostgreSQL Database Schema & Cloud Storage Setup (Self-Healing)
 -- ==============================================================================
 
--- 1. Notes Table
+-- 1. Create table if not exists
 create table if not exists public.voicepad_notes (
   id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -23,18 +23,24 @@ create table if not exists public.voicepad_notes (
   transcription_error text
 );
 
--- Migration support if the table already existed previously
+-- 2. Ensure all columns exist if table was previously created without them
 alter table public.voicepad_notes add column if not exists updated_at timestamptz not null default now();
 alter table public.voicepad_notes add column if not exists deleted_at timestamptz default null;
+alter table public.voicepad_notes add column if not exists audio_uri text;
 alter table public.voicepad_notes add column if not exists audio_path text;
+alter table public.voicepad_notes add column if not exists transcript text;
 alter table public.voicepad_notes add column if not exists summary text;
+alter table public.voicepad_notes add column if not exists transcription_status text;
+alter table public.voicepad_notes add column if not exists transcription_error text;
+alter table public.voicepad_notes add column if not exists pinned boolean not null default false;
+alter table public.voicepad_notes add column if not exists duration_seconds integer;
 
--- Indexes for performance
+-- 3. Indexes for fast search & sorting
 create index if not exists voicepad_notes_user_created_idx on public.voicepad_notes (user_id, created_at desc);
 create index if not exists voicepad_notes_user_updated_idx on public.voicepad_notes (user_id, updated_at desc);
 create index if not exists voicepad_notes_user_deleted_idx on public.voicepad_notes (user_id, deleted_at);
 
--- Row Level Security (RLS)
+-- 4. Row Level Security (RLS) - Users only access their own notes
 alter table public.voicepad_notes enable row level security;
 
 drop policy if exists "VoicePad users can read their own notes" on public.voicepad_notes;
@@ -53,7 +59,7 @@ drop policy if exists "VoicePad users can delete their own notes" on public.voic
 create policy "VoicePad users can delete their own notes" on public.voicepad_notes
   for delete using (auth.uid() = user_id);
 
--- Automatic updated_at trigger function
+-- 5. Trigger Function & Trigger
 create or replace function public.set_updated_at()
 returns trigger as $$
 begin
@@ -62,20 +68,14 @@ begin
 end;
 $$ language plpgsql;
 
--- Trigger definition
 drop trigger if exists set_voicepad_notes_updated_at on public.voicepad_notes;
 create trigger set_voicepad_notes_updated_at before update on public.voicepad_notes for each row execute function public.set_updated_at();
 
--- ==============================================================================
--- 2. Supabase Storage: 'voicepad-audio' Bucket
--- ==============================================================================
-
--- Create private bucket for voice recordings
+-- 6. Storage Bucket & Policies
 insert into storage.buckets (id, name, public)
 values ('voicepad-audio', 'voicepad-audio', false)
 on conflict (id) do nothing;
 
--- Storage RLS: Users can only upload, read, and delete within their own folder: ${auth.uid()}/*
 drop policy if exists "Users can upload their own audio" on storage.objects;
 create policy "Users can upload their own audio" on storage.objects
   for insert with check (
@@ -86,20 +86,6 @@ create policy "Users can upload their own audio" on storage.objects
 drop policy if exists "Users can read their own audio" on storage.objects;
 create policy "Users can read their own audio" on storage.objects
   for select using (
-    bucket_id = 'voicepad-audio'
-    and auth.uid()::text = (storage.foldername(name))[1]
-  );
-
-drop policy if exists "Users can update their own audio" on storage.objects;
-create policy "Users can update their own audio" on storage.objects
-  for update using (
-    bucket_id = 'voicepad-audio'
-    and auth.uid()::text = (storage.foldername(name))[1]
-  );
-
-drop policy if exists "Users can delete their own audio" on storage.objects;
-create policy "Users can delete their own audio" on storage.objects
-  for delete using (
     bucket_id = 'voicepad-audio'
     and auth.uid()::text = (storage.foldername(name))[1]
   );
