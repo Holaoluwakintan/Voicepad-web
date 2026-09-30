@@ -313,11 +313,23 @@ async function authMiddleware(req, res, next) {
     } catch {}
   }
 
-  if (requireAuth && !req.user) {
-    return res.status(401).json({ error: 'Authentication required. Please sign in to use VoicePad AI.', requestId: req.requestId });
+  // If user is authenticated, proceed
+  if (req.user) {
+    return next();
   }
 
-  next();
+  // If authentication is not strictly required, allow guests through
+  if (!requireAuth) {
+    return next();
+  }
+
+  // Even if REQUIRE_AUTH is enabled, allow guests during their free trial
+  const currentUsage = getUsageCount(req);
+  if (currentUsage < freeLimit) {
+    return next();
+  }
+
+  return res.status(401).json({ error: 'Authentication required. Please sign in to use VoicePad AI.', requestId: req.requestId });
 }
 
 app.get('/models', async (_req, res) => {
