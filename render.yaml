@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: voicepad-transcription
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8787
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_API_KEY_1
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY_1
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: METRICS_TOKEN
+        sync: false
+      - key: FREE_TRANSCRIPTIONS_LIMIT
+        value: 5
+      - key: REQUIRE_AUTH
+        value: false
+      - key: MAX_REQUESTS_PER_MINUTE
+        value: 15
+      - key: MAX_REQUESTS_PER_USER_PER_MINUTE
+        value: 25
+      - key: ALLOWED_ORIGINS
+        sync: false
